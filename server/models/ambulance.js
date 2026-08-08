@@ -1,4 +1,5 @@
 import mongoose from "mongoose";
+import { AmbulanceStatus } from "../constants/ambulanceStatus.js";
 
 // Translated from the reference repo's Vehicle.js. Field meanings unchanged,
 // just renamed to match the ambulance dispatch domain.
@@ -17,11 +18,11 @@ const ambulanceSchema = new mongoose.Schema(
     // mid-call. Enforce that guard in your controller, same as vehicleController.js did.
     status: {
       type: String,
-      enum: ["available", "dispatched", "onRoute", "working", "idle"],
-      default: "available",
+      enum: Object.values(AmbulanceStatus),
+      default: AmbulanceStatus.AVAILABLE,
     },
 
-    // ref must exactly match mongoose.model("...") in your driver-medicalCrew.js
+    // ref must exactly match mongoose.model("...") in your medicalCrew.js
     assigned_crew: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "MedicalCrew",
