@@ -1,4 +1,5 @@
 import mongoose from "mongoose";
+import { EmergencyStatus } from "../constants/emergencyStatus.js";
 
 const emergencySchema = new mongoose.Schema(
   {
@@ -16,8 +17,15 @@ const emergencySchema = new mongoose.Schema(
 
     status: {
       type: String,
-      enum: ["waiting", "pending_confirmation", "assigned", "resolved"],
-      default: "waiting",
+      enum: [
+        EmergencyStatus.WAITING,
+        EmergencyStatus.ASSIGNED,
+        EmergencyStatus.AT_SCENE,
+        EmergencyStatus.AWAITING_HOSPITAL,
+        EmergencyStatus.TRANSPORTING,
+        EmergencyStatus.RESOLVED,
+      ],
+      default: EmergencyStatus.WAITING,
     },
 
     assigned_ambulance: {
