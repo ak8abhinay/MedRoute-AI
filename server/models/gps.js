@@ -6,9 +6,9 @@ import mongoose from "mongoose";
 // per GPS reading, not a single row per vehicle.
 
 const gpsSchema = new mongoose.Schema({
-  vehicle: {
+  ambulance: {
     type: mongoose.Schema.Types.ObjectId,
-    ref: "Vehicle",
+    ref: "Ambulance",
     required: true,
     index: true,
   },
@@ -19,6 +19,6 @@ const gpsSchema = new mongoose.Schema({
 });
 
 // Matches the actual query pattern used everywhere: newest point per vehicle.
-gpsSchema.index({ vehicle: 1, timestamp: -1 });
+gpsSchema.index({ ambulance: 1, timestamp: -1 });
 
 export default mongoose.model("GPS", gpsSchema);
