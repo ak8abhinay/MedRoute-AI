@@ -5,6 +5,8 @@ import GPS from "../models/gps.js";
 import { getIO } from "../services/socketService.js";
 import logger from "../services/logger.js";
 import { updateAmbulanceStatus } from "../services/ambulanceService.js";
+import { cancelOnSceneTimer } from "../services/onSceneTimerService.js";
+import { stopHospitalRetry } from "../services/hospitalRetryService.js";
 
 /**
  * GET /api/ambulances
@@ -139,14 +141,14 @@ export const updateAmbulance = async (req, res) => {
 export const removeAmbulance = async (req, res) => {
   try {
     const ambulance = await Ambulance.findByIdAndDelete(req.params.id);
-    if (!ambulance) {
-      return res.status(404).json({ error: "Ambulance not found" });
-    }
+    if (!ambulance) return res.status(404).json({ error: "Ambulance not found" });
+
+    cancelOnSceneTimer(req.params.id);
+    stopHospitalRetry(req.params.id);
+
     logger.info("Ambulance removed", { ambulanceId: req.params.id });
     res.json({ ok: true });
-  } catch (e) {
-    res.status(400).json({ error: e.message });
-  }
+  } catch (e) { res.status(400).json({ error: e.message }); }
 };
 
 /**
