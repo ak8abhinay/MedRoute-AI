@@ -4,6 +4,14 @@ import mongoose from "mongoose";
 import app from "./app.js";
 import { initializeSocket } from "./services/socketService.js";
 import logger from "./services/logger.js";
+// Register Mongoose models
+import "./models/ambulance.js";
+import "./models/emergency.js";
+import "./models/trip.js";
+import "./models/alert.js";
+import "./models/medicalCrew.js";
+import "./models/hospital.js";
+import "./models/gps.js";
 
 // Socket.IO needs the raw HTTP server, not the Express app directly -
 // that's why app.js can't own this part.
