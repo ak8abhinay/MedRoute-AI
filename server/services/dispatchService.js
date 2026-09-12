@@ -12,6 +12,7 @@ import { getIO } from "./socketService.js";
 import logger from "./logger.js";
 import { calculateDistance } from "../utils/geoUtils.js";
 import { mapWithConcurrencyLimit } from "../utils/concurrency.js";
+import { predictScores } from "./mlService.js";
 
 // How many of the closest (by straight-line distance) available
 // ambulances get a real OSRM route lookup. Keeps "one OSRM call per
@@ -27,17 +28,34 @@ const OSRM_SCORING_CONCURRENCY = Number(process.env.OSRM_SCORING_CONCURRENCY) ||
 //   only one crew member exists in test data, so any role-matching logic
 //   would be unverifiable. Revisit once there's real multi-crew data.
 // + Traffic-aware ETA (needs a live traffic data source, not just OSRM)
-// + ML prediction
+// + ML prediction is now live for the top OSRM-routed candidates (see
+//   selectAmbulance below) - V1 distillation only, per
+//   docs/ambulance-scoring-spec.md. Straight-line fallback candidates
+//   remain out of ML scope.
 
-const scoreByRoute = async (ambulance, emergency) => {
+// Fetches real duration only - no scoring here. Deliberately separated
+// from scoring so ML can be tried once, batched, after all top-candidate
+// durations are known, rather than scored one-by-one as they arrive.
+const fetchDuration = async (ambulance, emergency) => {
   const route = await getRoute(ambulance.latitude, ambulance.longitude, emergency.latitude, emergency.longitude);
-  const score = 100 - Math.min(route.duration / 45, 40);
-  return { ambulance, score, routeSource: route.source, etaSeconds: route.duration };
+  return { ambulance, duration_seconds: route.duration, has_known_position: true, routeSource: route.source };
 };
 
+// The frozen V1 formula (docs/ambulance-scoring-spec.md), extracted as
+// its own function so it's both the ML fallback AND the only formula
+// this path ever used before ML existed - same function, two callers.
+const ruleScore = ({ duration_seconds, has_known_position }) => {
+  const penalty = has_known_position ? Math.min(duration_seconds / 45, 40) : 20;
+  return 100 - penalty;
+};
+
+// Straight-line approximation for candidates beyond the pre-filter -
+// UNCHANGED, out of ML scope. Different formula, different units (raw
+// meters, not duration) - never mixed with the ML/duration path.
 const scoreByStraightLine = (ambulance, straightLineDistance) => ({
   ambulance,
   score: straightLineDistance === Infinity ? 100 - 20 : 100 - Math.min(straightLineDistance / 500, 40),
+  scoreSource: "rule-straightline",
   routeSource: null,
   etaSeconds: null,
 });
@@ -45,15 +63,19 @@ const scoreByStraightLine = (ambulance, straightLineDistance) => ({
 /**
  * Selects the best available ambulance. Pre-filters to the closest
  * ROUTE_CANDIDATE_COUNT by straight-line distance, fetches real OSRM
- * routes (concurrency-limited) for just those, scores everyone else by
- * straight-line distance as a cheap fallback.
+ * durations (concurrency-limited) for just those, then scores them in
+ * ONE batched ML call - falling back to the exact same rule formula
+ * this path used before ML existed if the ML service is unavailable for
+ * any reason. Everyone else is scored by straight-line distance as a
+ * cheap fallback, unrelated to ML entirely.
  *
  * Deliberately does NOT take a MongoDB session - this makes real network
- * calls, and holding a transaction open across HTTP round-trips is worth
- * avoiding. Runs entirely before dispatchEmergency's transaction starts;
- * the transaction re-validates the chosen ambulance via
- * updateAmbulanceStatus's transition guard, so a same-instant collision
- * fails with a clear error instead of corrupting anything.
+ * calls (OSRM, and now the ML service), and holding a transaction open
+ * across HTTP round-trips is worth avoiding. Runs entirely before
+ * dispatchEmergency's transaction starts; the transaction re-validates
+ * the chosen ambulance via updateAmbulanceStatus's transition guard, so
+ * a same-instant collision fails with a clear error instead of
+ * corrupting anything.
  */
 const selectAmbulance = async (emergency) => {
   const candidates = await Ambulance.find({ status: "available" });
@@ -65,9 +87,7 @@ const selectAmbulance = async (emergency) => {
 
   // Crew-eligibility gate, applied BEFORE any scoring - a candidate must
   // either already have crew, or there must be at least one free crew
-  // member system-wide to pair with it at dispatch time. This runs on
-  // the raw candidate list only; everything below (pre-filter, OSRM
-  // scoring, fallback) is completely unchanged.
+  // member system-wide to pair with it at dispatch time.
   const crewAvailable = await MedicalCrew.exists({ assigned_ambulance: null });
   const eligible = candidates.filter((a) => a.assigned_crew || crewAvailable);
 
@@ -77,44 +97,68 @@ const selectAmbulance = async (emergency) => {
     throw err;
   }
 
-  // --- everything from here down is the existing routing-aware scoring
-  // pipeline, untouched, just now operating on `eligible` instead of
-  // the raw `candidates` list ---
-
-  const withStraightLine = eligible.map((ambulance) => ({
-    ambulance,
-    straightLineDistance:
-      ambulance.latitude != null && ambulance.longitude != null
-        ? calculateDistance(ambulance.latitude, ambulance.longitude, emergency.latitude, emergency.longitude)
-        : Infinity,
-  }));
-  withStraightLine.sort((a, b) => a.straightLineDistance - b.straightLineDistance);
+  const withStraightLine = eligible
+    .map((ambulance) => ({
+      ambulance,
+      straightLineDistance:
+        ambulance.latitude != null && ambulance.longitude != null
+          ? calculateDistance(ambulance.latitude, ambulance.longitude, emergency.latitude, emergency.longitude)
+          : Infinity,
+    }))
+    .sort((a, b) => a.straightLineDistance - b.straightLineDistance);
 
   const topCandidates = withStraightLine.slice(0, ROUTE_CANDIDATE_COUNT);
   const remainingCandidates = withStraightLine.slice(ROUTE_CANDIDATE_COUNT);
 
-  const routedScores = await mapWithConcurrencyLimit(
+  // Real durations for the top candidates - unchanged OSRM pipeline,
+  // no scoring decided yet.
+  const topWithDuration = await mapWithConcurrencyLimit(
     topCandidates,
     OSRM_SCORING_CONCURRENCY,
     ({ ambulance, straightLineDistance }) =>
       straightLineDistance === Infinity
-        ? scoreByStraightLine(ambulance, straightLineDistance)
-        : scoreByRoute(ambulance, emergency)
+        ? { ambulance, duration_seconds: 0, has_known_position: false, routeSource: null }
+        : fetchDuration(ambulance, emergency)
   );
 
-  const remainingScores = remainingCandidates.map(({ ambulance, straightLineDistance }) =>
+  // ONE batched ML call, only on the routed candidates - the frozen V1
+  // scope boundary. Falls back to the exact same rule formula this path
+  // used before ML existed if the ML service is unavailable for any reason.
+  const mlResult = await predictScores(topWithDuration);
+
+  const topScored = mlResult
+    ? topWithDuration.map((c, i) => ({
+        ambulance: c.ambulance,
+        score: mlResult.scores[i],
+        scoreSource: "ml",
+        routeSource: c.routeSource,
+        etaSeconds: c.duration_seconds,
+      }))
+    : topWithDuration.map((c) => ({
+        ambulance: c.ambulance,
+        score: ruleScore(c),
+        scoreSource: "rule",
+        routeSource: c.routeSource,
+        etaSeconds: c.duration_seconds,
+      }));
+
+  if (mlResult) {
+    logger.info("Ambulance scoring used ML", { candidateCount: topWithDuration.length });
+  }
+
+  const remainingScored = remainingCandidates.map(({ ambulance, straightLineDistance }) =>
     scoreByStraightLine(ambulance, straightLineDistance)
   );
 
-  const allScored = [...routedScores, ...remainingScores].sort((a, b) => b.score - a.score);
+  const allScored = [...topScored, ...remainingScored].sort((a, b) => b.score - a.score);
   return allScored[0];
 };
 
 /**
  * Orchestrates a full dispatch. Scoring (ambulance selection, hospital
  * recommendation) happens first, outside any transaction, since both
- * now make real OSRM network calls. Only the actual writes run inside
- * the atomic transaction.
+ * now make real network calls (OSRM, and now the ML service). Only the
+ * actual writes run inside the atomic transaction.
  */
 export const dispatchEmergency = async (emergencyId) => {
   const emergency = await Emergency.findById(emergencyId);
@@ -129,7 +173,7 @@ export const dispatchEmergency = async (emergencyId) => {
     throw err;
   }
 
-  const { ambulance: bestAmbulance, score, routeSource, etaSeconds } = await selectAmbulance(emergency);
+  const { ambulance: bestAmbulance, score, routeSource, scoreSource, etaSeconds } = await selectAmbulance(emergency);
   const hospitalResult = await recommendHospital(emergency);
   if (!hospitalResult) {
     logger.warn("Dispatching without a hospital recommendation - no eligible hospital found", {
@@ -177,11 +221,11 @@ export const dispatchEmergency = async (emergencyId) => {
       const trip = await createTrip(ambulance, txEmergency, hospital, session);
       const alert = await createDispatchAlert(txEmergency, ambulance, session);
 
-     result = {
-      ambulance, emergency: txEmergency, trip, alert, hospital, crew,
-      score, routeSource, etaSeconds,
-      hospitalScore, hospitalRouteSource, // new
-    };
+      result = {
+        ambulance, emergency: txEmergency, trip, alert, hospital, crew,
+        score, routeSource, scoreSource, etaSeconds,
+        hospitalScore, hospitalRouteSource,
+      };
     });
 
     if (!result) {
@@ -206,6 +250,7 @@ export const dispatchEmergency = async (emergencyId) => {
       crewId: result.crew ? result.crew._id.toString() : null,
       score: result.score,
       routeSource: result.routeSource,
+      scoreSource: result.scoreSource,
       etaSeconds: result.etaSeconds,
     });
 
