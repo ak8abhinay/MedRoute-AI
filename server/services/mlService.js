@@ -29,7 +29,7 @@ export const predictScores = async (candidates) => {
       })),
     };
 
-    const res = await axios.post(`${ML_SERVICE_URL}/api/predict`, payload, { timeout: ML_TIMEOUT_MS });
+    const res = await axios.post(`${ML_SERVICE_URL}/api/predict/ambulance`, payload, { timeout: ML_TIMEOUT_MS });
     const { best_index, scores } = res.data;
 
     if (!Number.isInteger(best_index)) {
