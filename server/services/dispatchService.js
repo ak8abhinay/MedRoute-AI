@@ -183,6 +183,7 @@ export const dispatchEmergency = async (emergencyId) => {
   const hospital = hospitalResult?.hospital || null;
   const hospitalScore = hospitalResult?.score ?? null;
   const hospitalRouteSource = hospitalResult?.routeSource ?? null;
+  const hospitalScoreSource = hospitalResult?.scoreSource ?? null;
 
   const session = await mongoose.startSession();
   let result = null;
@@ -224,7 +225,7 @@ export const dispatchEmergency = async (emergencyId) => {
       result = {
         ambulance, emergency: txEmergency, trip, alert, hospital, crew,
         score, routeSource, scoreSource, etaSeconds,
-        hospitalScore, hospitalRouteSource,
+        hospitalScore, hospitalScoreSource, hospitalRouteSource,
       };
     });
 
