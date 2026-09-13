@@ -56,3 +56,17 @@ class TrainResponse(BaseModel):
     correlation: float
     training_samples: int
     test_samples: int
+
+class HospitalCandidateRequest(BaseModel):
+    # Matches the frozen V1 hospital training feature set exactly -
+    # severity as an already-encoded ordinal (0/1/2), specialty_match
+    # already collapsed to boolean - the raw emergency_type category
+    # was never passed to this model, per the spec.
+    distance_penalty: float = Field(..., ge=0)
+    severity: int = Field(..., ge=0, le=2)
+    specialty_match: bool
+    available_beds: float = Field(..., ge=0)
+
+
+class HospitalPredictRequest(BaseModel):
+    candidates: List[HospitalCandidateRequest]
