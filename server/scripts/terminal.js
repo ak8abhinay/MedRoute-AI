@@ -8,4 +8,5 @@ Terminal	Command	From directory
 node scripts/resetTestData.js
 
 source venv/bin/activate => to python3 scripts/train_model.py when working with ml-services
+uvicorn main:app --reload --port 8000 => start ml-service
 */
