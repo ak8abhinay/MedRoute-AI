@@ -51,3 +51,49 @@ export const predictScores = async (candidates) => {
     return null;
   }
 };
+
+/**
+ * Scores a batch of hospital candidates via the FastAPI ML service, in
+ * ONE call - same batching reasoning as predictScores. Independent
+ * endpoint, independent model, independent feature contract - see
+ * docs/hospital-scoring-spec.md. Returns null on ANY failure, same
+ * fallback contract as the ambulance version.
+ *
+ * @param {Array<{distance_penalty: number, severity: number, specialty_match: boolean, available_beds: number}>} candidates
+ * @returns {Promise<{bestIndex: number, scores: number[]}|null>}
+ */
+export const predictHospitalScores = async (candidates) => {
+  if (!candidates || candidates.length === 0) return null;
+
+  try {
+    const payload = {
+      candidates: candidates.map((c) => ({
+        distance_penalty: c.distance_penalty,
+        severity: c.severity,
+        specialty_match: c.specialty_match,
+        available_beds: c.available_beds,
+      })),
+    };
+
+    const res = await axios.post(`${ML_SERVICE_URL}/api/predict/hospital`, payload, { timeout: ML_TIMEOUT_MS });
+    const { best_index, scores } = res.data;
+
+    if (!Number.isInteger(best_index)) {
+      throw new Error(`best_index is not an integer: ${JSON.stringify(best_index)}`);
+    }
+    if (!Array.isArray(scores) || scores.length !== candidates.length) {
+      throw new Error(`scores array missing or wrong length (expected ${candidates.length})`);
+    }
+    if (best_index < 0 || best_index >= scores.length) {
+      throw new Error(`best_index ${best_index} out of range for ${scores.length} scores`);
+    }
+    if (!scores.every(isValidNumber)) {
+      throw new Error("scores array contains a non-finite or non-numeric value");
+    }
+
+    return { bestIndex: best_index, scores };
+  } catch (err) {
+    logger.warn("Hospital ML prediction failed, falling back to rule-based scoring", { error: err.message });
+    return null;
+  }
+};
