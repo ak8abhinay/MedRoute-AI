@@ -8,3 +8,8 @@ export const SPEED_MULTIPLIER = Number(process.env.SIMULATOR_SPEED_MULTIPLIER) |
 export const TICK_INTERVAL_MS = Number(process.env.SIMULATOR_TICK_INTERVAL_MS) || 3000;
 export const REFRESH_INTERVAL_MS = Number(process.env.SIMULATOR_REFRESH_INTERVAL_MS) || 10000;
 export const ASSUMED_SPEED_KMH = 40; // for the "speed" field on GPS posts, display only
+
+export const SERVICE_API_KEY = process.env.SERVICE_API_KEY || "";
+if (!SERVICE_API_KEY) {
+  console.warn("[simulator] SERVICE_API_KEY is not set - backend requests will be rejected.");
+}

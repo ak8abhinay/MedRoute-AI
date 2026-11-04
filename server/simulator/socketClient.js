@@ -1,5 +1,5 @@
 import { io } from "socket.io-client";
-import { SOCKET_URL } from "./config.js";
+import { SOCKET_URL, SERVICE_API_KEY } from "./config.js";
 
 /**
  * Thin wrapper around the Socket.IO client connection. FleetManager
@@ -7,7 +7,10 @@ import { SOCKET_URL } from "./config.js";
  * owns the connection itself.
  */
 export const createSocketClient = () => {
-  const socket = io(SOCKET_URL, { transports: ["websocket"] });
+  const socket = io(SOCKET_URL, {
+    transports: ["websocket"],
+    auth: { apiKey: SERVICE_API_KEY },
+  });
 
   socket.on("connect", () => console.log(`[socket] Connected (${socket.id})`));
   socket.on("disconnect", (reason) => console.log(`[socket] Disconnected: ${reason}`));

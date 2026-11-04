@@ -1,3 +1,4 @@
+import { authedFetch } from "./http.js";
 import { postGpsUpdate } from "./gpsUpdater.js";
 import { getRoute } from "../services/routingService.js";
 import { TICK_INTERVAL_MS, SPEED_MULTIPLIER, ASSUMED_SPEED_KMH, BACKEND_URL } from "./config.js";
@@ -147,7 +148,7 @@ export class AmbulanceSimulator {
 
   async _fetchEmergency(emergencyId) {
     try {
-      const res = await fetch(`${BACKEND_URL}/api/emergencies/${emergencyId}`);
+      const res = await authedFetch(`${BACKEND_URL}/api/emergencies/${emergencyId}`);
       if (!res.ok) return null;
       return res.json();
     } catch {

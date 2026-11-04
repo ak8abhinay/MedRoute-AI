@@ -1,3 +1,4 @@
+import { authedFetch } from "./http.js";
 import { createSocketClient } from "./socketClient.js";
 import { AmbulanceSimulator } from "./ambulanceSimulator.js";
 import { BACKEND_URL, REFRESH_INTERVAL_MS } from "./config.js";
@@ -36,10 +37,25 @@ export class FleetManager {
   async _refresh() {
     let ambulances;
     try {
-      const res = await fetch(`${BACKEND_URL}/api/ambulances`);
+      const res = await authedFetch(`${BACKEND_URL}/api/ambulances`);
+      if (res.status === 401 || res.status === 403) {
+        console.error(
+          "[FleetManager] Backend rejected the service key. Check that SERVICE_API_KEY matches in server/.env, then restart the backend."
+        );
+        return;
+      }
+      if (!res.ok) {
+        console.error(`[FleetManager] Refresh failed: HTTP ${res.status}`);
+        return;
+      }
       ambulances = await res.json();
     } catch (err) {
       console.error("[FleetManager] Refresh failed:", err.message);
+      return;
+    }
+
+    if (!Array.isArray(ambulances)) {
+      console.error("[FleetManager] Refresh failed: unexpected response shape");
       return;
     }
 
@@ -99,7 +115,7 @@ export class FleetManager {
 
   async _findEmergencyForAmbulance(ambulanceId) {
     try {
-      const res = await fetch(`${BACKEND_URL}/api/emergencies`);
+      const res = await authedFetch(`${BACKEND_URL}/api/emergencies`);
       const emergencies = await res.json();
       return emergencies.find(
         (e) => e.assigned_ambulance?._id === ambulanceId || e.assigned_ambulance === ambulanceId
@@ -111,7 +127,7 @@ export class FleetManager {
 
   async _fetchAmbulance(ambulanceId) {
     try {
-      const res = await fetch(`${BACKEND_URL}/api/ambulances/${ambulanceId}`);
+      const res = await authedFetch(`${BACKEND_URL}/api/ambulances/${ambulanceId}`);
       if (!res.ok) return null;
       return res.json();
     } catch {
