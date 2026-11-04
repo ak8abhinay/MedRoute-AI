@@ -12,6 +12,15 @@ import "./models/alert.js";
 import "./models/medicalCrew.js";
 import "./models/hospital.js";
 import "./models/gps.js";
+import "./models/user.js";
+
+if (!process.env.JWT_SECRET || process.env.JWT_SECRET.length < 32) {
+  logger.error("JWT_SECRET must be set and at least 32 characters. Refusing to start.");
+  process.exit(1);
+}
+if (!process.env.SERVICE_API_KEY) {
+  logger.warn("SERVICE_API_KEY is not set - the simulator will not be able to authenticate (needed from step 1b).");
+}
 
 // Socket.IO needs the raw HTTP server, not the Express app directly -
 // that's why app.js can't own this part.

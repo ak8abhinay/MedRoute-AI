@@ -42,7 +42,7 @@ export default function MapView({ ambulances, emergencies, hospitals }) {
         ))}
 
       {emergencies
-        .filter((e) => e.status !== "resolved")
+        .filter((e) => e.status !== "resolved" && e.status !== "cancelled")
         .map((e) => (
           <Marker key={e._id} position={[e.latitude, e.longitude]} icon={divIcon(emergencyColor(e.severity), "square")}>
             <Popup>
