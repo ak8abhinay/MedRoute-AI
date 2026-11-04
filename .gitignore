@@ -1,0 +1,8 @@
+# OSRM routing data
+osrm/data/
+*.env
+node_modules/
+ml-service/venv/
+ml-service/models/*.pkl
+__pycache__/
+*.pyc
