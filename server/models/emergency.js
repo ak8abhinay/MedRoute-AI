@@ -18,12 +18,14 @@ const emergencySchema = new mongoose.Schema(
     status: {
       type: String,
       enum: [
+        EmergencyStatus.PENDING_REVIEW,
         EmergencyStatus.WAITING,
         EmergencyStatus.ASSIGNED,
         EmergencyStatus.AT_SCENE,
         EmergencyStatus.AWAITING_HOSPITAL,
         EmergencyStatus.TRANSPORTING,
         EmergencyStatus.RESOLVED,
+        EmergencyStatus.CANCELLED,
       ],
       default: EmergencyStatus.WAITING,
     },
@@ -42,6 +44,23 @@ const emergencySchema = new mongoose.Schema(
 
     detail: { type: String, default: "" },
     reported_date: { type: Date, default: Date.now },
+
+    // --- public (patient/family) requests ---
+    source: { type: String, enum: ["staff", "public"], default: "staff" },
+
+    // NO `default: null` on the two unique fields below. A sparse unique
+    // index skips documents where the field is MISSING but still indexes
+    // null, so a null default would make every staff-created emergency
+    // collide with the next one.
+    reference: { type: String, index: { unique: true, sparse: true } },
+    tracking_token_hash: { type: String, select: false, index: { unique: true, sparse: true } },
+    tracking_expires_at: { type: Date },
+
+    // Personal data: hidden from every query unless explicitly requested
+    // with .select("+contact_name +contact_phone"). Only the staff read
+    // paths do that - never the simulator's key, never a populate.
+    contact_name: { type: String, select: false },
+    contact_phone: { type: String, select: false },
   },
   { timestamps: true }
 );
